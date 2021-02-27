@@ -77,6 +77,7 @@ bets <- read_csv("data/bets_anon.csv")
 bets2 <- bets %>% 
   group_by(ppt_id) %>% 
   summarise(amount = sum(abs(total_amt_bet)), 
+            average = mean(abs(total_amt_bet)),
             total_win = sum(win)) 
 
 part2 <- left_join(part2, bets2) %>% 
@@ -938,6 +939,149 @@ mnb1 %>%
         axis.title.y = element_blank())
 ```
 
+# Model 3: Average Bet Size
+
+```{r}
+part_nozero <- part_nozero %>% 
+  mutate(average_scaled = average / 2)
+```
+
+The following shows the distribution of average bet sizes for those that bet at least once. The left plot shows the actual averages and the right plot the average scaled to the 0 to 1 range (i.e., after dividing by 2 as pre-registered). We can see that the distribution of actual averages is multi-modal with peaks at several prominent numbers: the first peak at the minimum possible bet size 0.1, the second peak at 0.5, the largest peak at the center at 1 and finally a large peak at the maximum of 2. As pre-registered we will analyse the data with a one-inflated beta-regression model.
+
+```{r}
+cowplot::plot_grid(
+  part_nozero %>% 
+  ggplot(aes(average)) +
+  geom_histogram(bins = 50), 
+  part_nozero %>% 
+  ggplot(aes(average_scaled)) +
+  geom_histogram(bins = 50), nrow = 1
+)
+```
+
+
+```{r, eval=TRUE, include=FALSE}
+oib <- custom_family(
+  "oib", dpars = c("mu", "phi", "oi"),
+  links = c("logit", "log", "logit"), lb = c(NA, 0, NA),
+  type = "real"
+)
+
+stan_funs <- "
+/* zero-one-inflated beta log-PDF of a single response 
+   * Args: 
+   *   y: response value 
+   *   mu: mean parameter of the beta part
+   *   phi: precision parameter of the beta part
+   *   oi: one-inflation probability
+   * Returns:  
+   *   a scalar to be added to the log posterior 
+   */ 
+   real oib_lpdf(real y, real mu, real phi, real oi) {
+     row_vector[2] shape = [mu * phi, (1 - mu) * phi]; 
+     if (y == 1) {
+       return bernoulli_lpmf(1 | oi);
+     } else { 
+       return bernoulli_lpmf(0 | oi) + beta_lpdf(y | shape[1], shape[2]);
+     } 
+   }
+"
+stanvars <- stanvar(scode = stan_funs, block = "functions")
+
+
+oib_model <- bf(
+  average_scaled ~ exp_cond,
+  phi ~ 1,
+  oi ~ exp_cond, 
+  family = oib
+)
+
+np <- prior_string("target += logistic_lpdf(Intercept_oi | 0, 1)", check = FALSE)
+
+# make_stancode(oib_model, data = part_nozero, stanvars = stanvars, prior = np)
+# tmp <- make_standata(zoib_model, data = part2, stanvars = stanvars) 
+# str(tmp)
+# tmp$Y
+tmp_model_filename <- "model_fits/model_oib.rda"
+if (file.exists(tmp_model_filename)) {
+  load(tmp_model_filename)
+} else {
+  moib <- brm(formula = oib_model, data = part_nozero, 
+               stanvars = stanvars, prior = np, 
+               iter = 26000, warmup = 1000, chains = 4) ## 100,000 post-warmup
+save(moib, file = tmp_model_filename, compress = "xz")
+}
+
+```
+
+```{r}
+summary(moib)
+```
+
+```{r, fig.asp=1.0}
+plot(moib)
+```
+
+
+
+```{r}
+## we need to create a custom RNG function for this case
+posterior_predict_oib <- function(i, prep, ...) {
+  oi <- brms:::get_dpar(prep, "oi", i)
+  mu <- brms:::get_dpar(prep, "mu", i = i)
+  phi <- brms:::get_dpar(prep, "phi", i = i)
+  hu <- runif(prep$nsamples, 0, 1)
+  #one_or_zero <- runif(prep$nsamples, 0, 1)
+  ifelse(hu < oi, 1, 
+         rbeta(prep$nsamples, shape1 = mu * phi, shape2 = (1 - mu) * phi)
+  )
+}
+
+```
+
+When comparing the actual data with synthetic data from the model, we can see an obvious problem due to the use of prominent numbers. Whereas the peak at 1 is nicely recovered by the model, the other peaks are not. However, the overall shape of the synthetic data is at least similar to the shape of the observed data.
+
+```{r, fig.width=6, out.width="100%"}
+pp_check(moib, type = "hist", binwidth = 0.025, nsamples = 11) 
+```
+
+```{r}
+post_moi_mu <- moib %>% 
+  emmeans("exp_cond", dpar = "mu") %>% 
+  gather_emmeans_draws() %>% 
+  mutate(mu = plogis(.value)) %>% 
+  select(-.value)
+
+post_moi_oi <- moib %>% 
+  emmeans::emmeans("exp_cond", dpar = "oi") %>% 
+  gather_emmeans_draws() %>% 
+  mutate(oi = plogis(.value))  %>% 
+  select(-.value) 
+
+post_both <- left_join(post_moi_mu, post_moi_oi) %>%
+  pivot_longer(c(mu, oi), names_to = "parameter", values_to = "value") %>%
+  mutate(parameter = factor(parameter, levels = c("mu", "oi"), 
+                            labels = c("Mean bet size", "Bet everything"))) 
+ggplot(post_both, aes(x = value, y = exp_cond)) +
+  stat_halfeye() +
+  facet_wrap("parameter", scales = "free_x") +
+  ylab(ylabel) + xlab("Probability/Proportion")
+```
+
+Difference distribution:
+
+```{r}
+post_both %>%
+  group_by(parameter) %>% 
+  compare_levels(value, exp_cond) %>% 
+  ggplot(aes(value)) +
+  stat_halfeye() +
+  facet_wrap("parameter", scales = "free_x") +
+  labs(x = "Differences in average bet sizes", y = "") +
+  theme(axis.ticks.y = element_blank(), 
+        axis.text.y = element_blank(), 
+        axis.title.y = element_blank())
+```
 
 
 # Riskiness of Bets
