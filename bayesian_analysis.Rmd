@@ -30,6 +30,7 @@ library("brms")
 library("tidybayes")
 library("BayesFactor")
 library("binom")
+library("emmeans")
 par_labels <- c("Gamble at all?", 
                 "Gamble everything?", 
                "Proportion bet?")
@@ -134,7 +135,7 @@ part2 %>%
 ```
 
 
-# Distribution of DV
+# Distribution of Proportion Bet
 
 Our main DV clearly does not look normally distributed.
 
@@ -161,7 +162,7 @@ binom.confint(nrow(part2) - sum(part2$new_prop == 0), nrow(part2))
 
 
 
-# Zero-One Inflated Beta Regression
+# Model 1: Zero-One Inflated Beta Regression on Proportion Bet
 
 We use a custom parameterization of a zero-one-inflated beta-regression model (see also [here](https://vuorre.netlify.com/post/2019/02/18/analyze-analog-scale-ratings-with-zero-one-inflated-beta-models/)). The likelihood of the model is given by:
 
@@ -462,7 +463,7 @@ pr2 + theme_bw(base_size = 17) +
 ggsave(pr2  + theme_bw(base_size = 17) + theme(
     panel.grid.minor.x = element_blank(), 
     panel.grid.major.x = element_blank()
-  ), filename = "res_speed_diff.png", 
+  ), filename = "figures/res_speed_diff.png", 
        width = 9.5, height = 4)
 pr2use <- pr2  + theme_bw(base_size = 17) + theme(
     panel.grid.minor.x = element_blank(), 
@@ -850,6 +851,94 @@ comppars %>%
   ylab("   ") +
   scale_x_continuous(labels = scales::percent_format(1)) 
 ```
+
+# Model 2: Total Number of Spins
+
+```{r}
+part_nozero <- part2 %>% 
+  filter(amount != 0)
+```
+
+
+```{r}
+part2 %>% 
+  ggplot(aes(bet_count)) +
+  geom_bar()
+```
+
+```{r}
+
+
+nb_mod1 <- bf(
+  bet_count | trunc(lb = 1) ~ exp_cond,
+  family = negbinomial
+)
+
+tmp_model_filename <- "model_fits/model2_v1.rda"
+if (file.exists(tmp_model_filename)) {
+  load(tmp_model_filename)
+} else {
+  mnb1 <- brm(formula = nb_mod1, data = part_nozero, 
+                iter = 26000, warmup = 1000, chains = 4)
+  save(mnb1, file = tmp_model_filename, compress = "xz")
+}
+```
+
+```{r}
+summary(mnb1)
+```
+
+```{r}
+plot(mnb1)
+```
+
+The data seems to be well described by the model.
+
+```{r, fig.width=6, out.width="100%"}
+pp_check(mnb1, type = "hist", binwidth = 0.025, nsamples = 11, ntrys = 100) 
+```
+
+When we zoom in (i.e., ignore data points above 50 for the plot), we can see the that the real and synthetic data match quite well.
+
+```{r, fig.width=6, out.width="100%"}
+pp_check(mnb1, type = "hist", binwidth = 0.025, nsamples = 11, ntrys = 100) +
+  coord_cartesian(xlim = c(0, 50))
+```
+
+```{r}
+mnb1 %>% 
+  emmeans("exp_cond") %>% 
+  gather_emmeans_draws() %>% 
+  mutate(mean = exp(.value)) %>% 
+  ggplot(aes(y = exp_cond, x = mean)) +
+  stat_halfeye() +
+  ylab(ylabel) + xlab("Predicted mean number of spins")
+```
+
+```{r}
+mnb1 %>% 
+  emmeans("exp_cond") %>% 
+  gather_emmeans_draws() %>% 
+  mutate(mean = exp(.value)) %>% 
+  median_qi(mean)
+```
+
+
+```{r}
+mnb1 %>% 
+  emmeans("exp_cond") %>% 
+  gather_emmeans_draws() %>% 
+  mutate(mean = exp(.value)) %>% 
+  compare_levels(mean, exp_cond) %>% 
+  ggplot(aes(x = mean)) +
+  stat_halfeye() +
+  labs(x = "Difference in mean number of spins", y = "") +
+  theme(axis.ticks.y = element_blank(), 
+        axis.text.y = element_blank(), 
+        axis.title.y = element_blank())
+```
+
+
 
 # Riskiness of Bets
 
