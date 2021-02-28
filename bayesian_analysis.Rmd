@@ -504,9 +504,9 @@ comppars %>%
 
 Note that a prior with SD of .05 means that we expect with 95% probability that the largest effect we observe is `r scales::percent(plogis(0.05 *2) - 0.5, accuracy = 0.01)` on the response scale.
 
-# Model With Covariates
+# Model 1 With PGSI
 
-The covariates do not differ between conditions (evidence for the null).
+The covariate scores do not differ between conditions (evidence for the null).
 
 ```{r, warning=FALSE}
 1/anovaBF(pgsi ~ exp_cond, part2, progress = FALSE)
@@ -889,19 +889,19 @@ if (file.exists(tmp_model_filename)) {
 summary(mnb1)
 ```
 
-```{r}
+```{r, fig.asp=0.9}
 plot(mnb1)
 ```
 
 The data seems to be well described by the model.
 
-```{r, fig.width=6, out.width="100%"}
+```{r, fig.width=6, out.width="100%", warning=FALSE}
 pp_check(mnb1, type = "hist", binwidth = 0.025, nsamples = 11, ntrys = 100) 
 ```
 
 When we zoom in (i.e., ignore data points above 50 for the plot), we can see the that the real and synthetic data match quite well.
 
-```{r, fig.width=6, out.width="100%"}
+```{r, fig.width=6, out.width="100%", warning=FALSE}
 pp_check(mnb1, type = "hist", binwidth = 0.025, nsamples = 11, ntrys = 100) +
   coord_cartesian(xlim = c(0, 50))
 ```
@@ -938,6 +938,129 @@ mnb1 %>%
         axis.text.y = element_blank(), 
         axis.title.y = element_blank())
 ```
+
+# Model 2 With PGSI
+
+## With Main Effects
+
+```{r}
+nb_mod2 <- bf(
+  bet_count | trunc(lb = 1) ~ exp_cond + pgsi_c,
+  family = negbinomial
+)
+
+tmp_model_filename <- "model_fits/model2_v2.rda"
+if (file.exists(tmp_model_filename)) {
+  load(tmp_model_filename)
+} else {
+  mnb2 <- brm(formula = nb_mod2, data = part_nozero, 
+                iter = 26000, warmup = 1000, chains = 4, inits = "0")
+  save(mnb2, file = tmp_model_filename, compress = "xz")
+}
+```
+
+```{r}
+summary(mnb2)
+```
+
+```{r, fig.asp=1.0}
+plot(mnb2)
+```
+
+
+```{r}
+mnb2 %>% 
+  emmeans("exp_cond") %>% 
+  gather_emmeans_draws() %>% 
+  mutate(mean = exp(.value)) %>% 
+  ggplot(aes(y = exp_cond, x = mean)) +
+  stat_halfeye() +
+  ylab(ylabel) + xlab("Predicted mean number of spins")
+```
+
+```{r}
+mnb2 %>% 
+  emmeans("exp_cond") %>% 
+  gather_emmeans_draws() %>% 
+  mutate(mean = exp(.value)) %>% 
+  median_qi(mean)
+```
+
+
+```{r}
+mnb2 %>% 
+  emmeans("exp_cond") %>% 
+  gather_emmeans_draws() %>% 
+  mutate(mean = exp(.value)) %>% 
+  compare_levels(mean, exp_cond) %>% 
+  ggplot(aes(x = mean)) +
+  stat_halfeye() +
+  labs(x = "Difference in mean number of spins", y = "") +
+  theme(axis.ticks.y = element_blank(), 
+        axis.text.y = element_blank(), 
+        axis.title.y = element_blank())
+```
+
+## With Interactions
+
+```{r}
+nb_mod3 <- bf(
+  bet_count | trunc(lb = 1) ~ exp_cond * pgsi_c,
+  family = negbinomial
+)
+
+tmp_model_filename <- "model_fits/model2_v3.rda"
+if (file.exists(tmp_model_filename)) {
+  load(tmp_model_filename)
+} else {
+  mnb3 <- brm(formula = nb_mod3, data = part_nozero, 
+                iter = 26000, warmup = 1000, chains = 4, inits = "0")
+  save(mnb3, file = tmp_model_filename, compress = "xz")
+}
+```
+
+```{r}
+summary(mnb3)
+```
+
+```{r, fig.asp=1.0}
+plot(mnb3)
+```
+
+
+```{r}
+mnb3 %>% 
+  emmeans("exp_cond") %>% 
+  gather_emmeans_draws() %>% 
+  mutate(mean = exp(.value)) %>% 
+  ggplot(aes(y = exp_cond, x = mean)) +
+  stat_halfeye() +
+  ylab(ylabel) + xlab("Predicted mean number of spins")
+```
+
+```{r}
+mnb3 %>% 
+  emmeans("exp_cond") %>% 
+  gather_emmeans_draws() %>% 
+  mutate(mean = exp(.value)) %>% 
+  median_qi(mean)
+```
+
+
+```{r}
+mnb3 %>% 
+  emmeans("exp_cond") %>% 
+  gather_emmeans_draws() %>% 
+  mutate(mean = exp(.value)) %>% 
+  compare_levels(mean, exp_cond) %>% 
+  ggplot(aes(x = mean)) +
+  stat_halfeye() +
+  labs(x = "Difference in mean number of spins", y = "") +
+  theme(axis.ticks.y = element_blank(), 
+        axis.text.y = element_blank(), 
+        axis.title.y = element_blank())
+```
+
 
 # Model 3: Average Bet Size
 
@@ -1053,6 +1176,146 @@ post_moi_mu <- moib %>%
   select(-.value)
 
 post_moi_oi <- moib %>% 
+  emmeans::emmeans("exp_cond", dpar = "oi") %>% 
+  gather_emmeans_draws() %>% 
+  mutate(oi = plogis(.value))  %>% 
+  select(-.value) 
+
+post_both <- left_join(post_moi_mu, post_moi_oi) %>%
+  pivot_longer(c(mu, oi), names_to = "parameter", values_to = "value") %>%
+  mutate(parameter = factor(parameter, levels = c("mu", "oi"), 
+                            labels = c("Mean bet size", "Bet everything"))) 
+ggplot(post_both, aes(x = value, y = exp_cond)) +
+  stat_halfeye() +
+  facet_wrap("parameter", scales = "free_x") +
+  ylab(ylabel) + xlab("Probability/Proportion")
+```
+
+Difference distribution:
+
+```{r}
+post_both %>%
+  group_by(parameter) %>% 
+  compare_levels(value, exp_cond) %>% 
+  ggplot(aes(value)) +
+  stat_halfeye() +
+  facet_wrap("parameter", scales = "free_x") +
+  labs(x = "Differences in average bet sizes", y = "") +
+  theme(axis.ticks.y = element_blank(), 
+        axis.text.y = element_blank(), 
+        axis.title.y = element_blank())
+```
+
+# Model 3 with PGSI
+
+## With Main Effect
+
+```{r, eval=TRUE, include=FALSE}
+
+oib_model2 <- bf(
+  average_scaled ~ exp_cond + pgsi_c,
+  phi ~ 1,
+  oi ~ exp_cond, 
+  family = oib
+)
+
+tmp_model_filename <- "model_fits/model_oib_v2.rda"
+if (file.exists(tmp_model_filename)) {
+  load(tmp_model_filename)
+} else {
+  moib2 <- brm(formula = oib_model2, data = part_nozero, 
+               stanvars = stanvars, prior = np, 
+               iter = 26000, warmup = 1000, chains = 4) ## 100,000 post-warmup
+save(moib2, file = tmp_model_filename, compress = "xz")
+}
+
+```
+
+```{r}
+summary(moib2)
+```
+
+```{r, fig.asp=1.0}
+plot(moib2, pars = "Sloweddown|pgsi")
+```
+
+```{r}
+post_moi_mu <- moib2 %>% 
+  emmeans("exp_cond", dpar = "mu") %>% 
+  gather_emmeans_draws() %>% 
+  mutate(mu = plogis(.value)) %>% 
+  select(-.value)
+
+post_moi_oi <- moib2 %>% 
+  emmeans::emmeans("exp_cond", dpar = "oi") %>% 
+  gather_emmeans_draws() %>% 
+  mutate(oi = plogis(.value))  %>% 
+  select(-.value) 
+
+post_both <- left_join(post_moi_mu, post_moi_oi) %>%
+  pivot_longer(c(mu, oi), names_to = "parameter", values_to = "value") %>%
+  mutate(parameter = factor(parameter, levels = c("mu", "oi"), 
+                            labels = c("Mean bet size", "Bet everything"))) 
+ggplot(post_both, aes(x = value, y = exp_cond)) +
+  stat_halfeye() +
+  facet_wrap("parameter", scales = "free_x") +
+  ylab(ylabel) + xlab("Probability/Proportion")
+```
+
+Difference distribution:
+
+```{r}
+post_both %>%
+  group_by(parameter) %>% 
+  compare_levels(value, exp_cond) %>% 
+  ggplot(aes(value)) +
+  stat_halfeye() +
+  facet_wrap("parameter", scales = "free_x") +
+  labs(x = "Differences in average bet sizes", y = "") +
+  theme(axis.ticks.y = element_blank(), 
+        axis.text.y = element_blank(), 
+        axis.title.y = element_blank())
+```
+
+## With Interaction
+
+```{r, eval=TRUE, include=FALSE}
+
+oib_model3 <- bf(
+  average_scaled ~ exp_cond * pgsi_c,
+  phi ~ 1,
+  oi ~ exp_cond, 
+  family = oib
+)
+
+tmp_model_filename <- "model_fits/model_oib_v3.rda"
+if (file.exists(tmp_model_filename)) {
+  load(tmp_model_filename)
+} else {
+  moib3 <- brm(formula = oib_model3, data = part_nozero, 
+               stanvars = stanvars, prior = np, 
+               iter = 26000, warmup = 1000, chains = 4) ## 100,000 post-warmup
+save(moib3, file = tmp_model_filename, compress = "xz")
+}
+
+```
+
+```{r}
+summary(moib3)
+```
+
+```{r, fig.asp=1.0}
+plot(moib3, pars = "Sloweddown|pgsi")
+```
+
+```{r, message=FALSE}
+post_moi_mu <- moib3 %>% 
+  emmeans("exp_cond", dpar = "mu") %>% 
+  gather_emmeans_draws() %>% 
+  mutate(mu = plogis(.value)) %>% 
+  select(-.value)
+
+post_moi_oi <- moib3 %>% 
   emmeans::emmeans("exp_cond", dpar = "oi") %>% 
   gather_emmeans_draws() %>% 
   mutate(oi = plogis(.value))  %>% 
