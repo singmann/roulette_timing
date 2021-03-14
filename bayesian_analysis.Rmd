@@ -15,7 +15,14 @@ knitr::opts_chunk$set(dpi=200, out.width="70%", fig.asp = 0.618,
 options(width = 110)
 options("dplyr.summarise.inform" = FALSE)
 options(pillar.sigfig = 3)
-options(mc.cores = parallel::detectCores()) # fitting uses multicore by default
+
+if (Sys.info()[['sysname']] == "Windows") {
+  options(mc.cores = 1) 
+} else {
+  options(mc.cores = parallel::detectCores()) # fitting uses multicore by default
+}
+
+
 ```
 
 # Preparation
@@ -73,12 +80,20 @@ table(participants_red$exp_cond)
 ```
 
 ```{r, message=FALSE, warning=FALSE, include=FALSE}
-bets <- read_csv("data/bets_anon.csv")
+bets <- read_csv("data/bets_anon.csv") %>% 
+  group_by(ppt_id) %>% 
+  mutate(bet_time = as.numeric(strptime(bet_time, format="%H:%M:%S"))) %>% 
+  mutate(timep = lag(bet_time)) %>% 
+  mutate(time = bet_time - timep) %>% 
+  #select(ppt_id:bet_time, timep, time) %>% 
+  ungroup
+
 bets2 <- bets %>% 
   group_by(ppt_id) %>% 
   summarise(amount = sum(abs(total_amt_bet)), 
             average = mean(abs(total_amt_bet)),
-            total_win = sum(win)) 
+            total_win = sum(win), 
+            average_time = mean(time, na.rm = TRUE)) 
 
 part2 <- left_join(part2, bets2) %>% 
   mutate(amount = if_else(is.na(amount), 0, amount),
@@ -133,6 +148,54 @@ part2 %>%
             se_bonus = sd(bonus)/sqrt(n()), 
             max_bonus = max(bonus),
             min_bonus = min(bonus))
+```
+
+
+# Distribution of Betting Times
+
+We considered the time participants took for each round of roulette starting with the second round (as this was the first round to which the 1 minute slow down applied).
+
+The first graph shows the distribution of individual betting times in seconds when restricting the shown range.
+
+```{r}
+bet_times <- bets %>% 
+  left_join(select(part2, ppt_id, exp_cond)) %>% 
+  filter(ppt_id %in% part2$ppt_id) %>% 
+  filter(!is.na(time))
+
+bet_times %>% 
+  ggplot(aes(time)) +
+  geom_vline(xintercept = 60, color = "grey") +
+  geom_histogram(binwidth = 5, boundary = 0) +
+  facet_wrap("exp_cond") +
+  coord_cartesian(xlim = c(0, 150))
+```
+
+However, this plot excludes a few very long betting times, most of which occurred in the slowed down version.
+
+```{r}
+bet_times %>% 
+  filter(time > 300) %>% 
+  select(ppt_id, exp_cond, time)
+
+nib <- bet_times %>% 
+  filter(time < 300, time > 150)
+
+
+```
+
+An additional `r nrow(nib)` betting times (of which `r table(nib$exp_cond)[2]` are in the slowed down version) within the range of 150 to 300 seconds are not shown here.
+
+We can also look at some overall statistics of the betting times:
+```{r}
+bet_times %>% 
+  group_by(exp_cond) %>% 
+  summarise(across(
+    time, 
+    .fns = list(mean = mean, 
+                median = median, 
+                sd = sd, 
+                IQR = IQR)))
 ```
 
 
