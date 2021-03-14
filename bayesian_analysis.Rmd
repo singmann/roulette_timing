@@ -41,7 +41,7 @@ library("emmeans")
 par_labels <- c("Gamble at all?", 
                 "Gamble everything?", 
                "Proportion bet?")
-cond_labels <- c("Normal", "Slowed down")
+cond_labels <- c("Normal", "Slowed-down")
 ylabel <- "Gambling speed"
 ```
 
@@ -128,8 +128,8 @@ part2 <- left_join(part2, pgsi) %>%
   mutate(pgsi_c = pgsi - mean(pgsi))
 ```
 
-
-# Payed bonus
+# Descrptive Statistics
+## Payed bonus
 
 Overall bonus paid out was:
 
@@ -150,14 +150,25 @@ part2 %>%
             min_bonus = min(bonus))
 ```
 
+## PGSI Scores Overall
 
-# Distribution of Betting Times
+```{r}
+#options(pillar.sigfig = 1)
+pgsi %>% 
+  summarise(mean = mean(pgsi),
+            sd = sd(pgsi),
+            perc_larger_7 = mean(pgsi > 7)) 
+#options(pillar.sigfig = 3)
+```
+
+
+## Distribution of Betting Times
 
 We considered the time participants took for each round of roulette starting with the second round (as this was the first round to which the 1 minute slow down applied).
 
 The first graph shows the distribution of individual betting times in seconds when restricting the shown range.
 
-```{r}
+```{r, message=FALSE}
 bet_times <- bets %>% 
   left_join(select(part2, ppt_id, exp_cond)) %>% 
   filter(ppt_id %in% part2$ppt_id) %>% 
@@ -188,6 +199,7 @@ An additional `r nrow(nib)` betting times (of which `r table(nib$exp_cond)[2]` a
 
 We can also look at some overall statistics of the betting times:
 ```{r}
+options(pillar.sigfig = 4)
 bet_times %>% 
   group_by(exp_cond) %>% 
   summarise(across(
@@ -196,10 +208,11 @@ bet_times %>%
                 median = median, 
                 sd = sd, 
                 IQR = IQR)))
+options(pillar.sigfig = 3)
 ```
 
 
-# Distribution of Proportion Bet
+## Distribution of Proportion Bet
 
 Our main DV clearly does not look normally distributed.
 
@@ -224,7 +237,42 @@ Binomial confidence or credibility intervals for the probability to gamble at al
 binom.confint(nrow(part2) - sum(part2$new_prop == 0), nrow(part2))
 ```
 
+## Numbers of Spins
 
+The `l0` variables refer to the subset of participants who made at least 1 spin (i.e., number of spinds is larger than zero).
+
+```{r}
+part2 %>% 
+  summarise(mean = mean(amount),
+            sd = sd(amount),
+            mean_l0 = mean(amount[amount != 0]),
+            sd_l0 = sd(amount[amount != 0]))
+```
+
+```{r}
+part2 %>% 
+  group_by(exp_cond) %>% 
+  summarise(mean = mean(amount),
+            sd = sd(amount),
+            mean_l0 = mean(amount[amount != 0]),
+            sd_l0 = sd(amount[amount != 0]))
+```
+
+
+## Average bet size
+
+```{r}
+part2 %>% 
+  summarise(mean = mean(average, na.rm = TRUE),
+            sd = sd(average, na.rm = TRUE))
+```
+
+```{r}
+part2 %>% 
+  group_by(exp_cond) %>% 
+  summarise(mean = mean(average, na.rm = TRUE),
+            sd = sd(average, na.rm = TRUE))
+```
 
 # Model 1: Zero-One Inflated Beta Regression on Proportion Bet
 
@@ -1247,7 +1295,7 @@ post_moi_oi <- moib %>%
 post_both <- left_join(post_moi_mu, post_moi_oi) %>%
   pivot_longer(c(mu, oi), names_to = "parameter", values_to = "value") %>%
   mutate(parameter = factor(parameter, levels = c("mu", "oi"), 
-                            labels = c("Mean bet size", "Bet everything"))) 
+                            labels = c("Mean bet size", "Bet maximum"))) 
 ggplot(post_both, aes(x = value, y = exp_cond)) +
   stat_halfeye() +
   facet_wrap("parameter", scales = "free_x") +
@@ -1318,7 +1366,7 @@ post_moi_oi <- moib2 %>%
 post_both <- left_join(post_moi_mu, post_moi_oi) %>%
   pivot_longer(c(mu, oi), names_to = "parameter", values_to = "value") %>%
   mutate(parameter = factor(parameter, levels = c("mu", "oi"), 
-                            labels = c("Mean bet size", "Bet everything"))) 
+                            labels = c("Mean bet size", "Bet maximum"))) 
 ggplot(post_both, aes(x = value, y = exp_cond)) +
   stat_halfeye() +
   facet_wrap("parameter", scales = "free_x") +
@@ -1387,7 +1435,7 @@ post_moi_oi <- moib3 %>%
 post_both <- left_join(post_moi_mu, post_moi_oi) %>%
   pivot_longer(c(mu, oi), names_to = "parameter", values_to = "value") %>%
   mutate(parameter = factor(parameter, levels = c("mu", "oi"), 
-                            labels = c("Mean bet size", "Bet everything"))) 
+                            labels = c("Mean bet size", "Bet maximum"))) 
 ggplot(post_both, aes(x = value, y = exp_cond)) +
   stat_halfeye() +
   facet_wrap("parameter", scales = "free_x") +
