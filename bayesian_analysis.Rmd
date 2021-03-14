@@ -436,7 +436,8 @@ condpars <- lpars %>%
   mutate(parameter = factor(
     x = parameter, 
     levels = c("g", "f", "mu"), 
-    labels = par_labels))
+    labels = par_labels)) %>% 
+  mutate(condition = factor(condition, labels = cond_labels))
 
 condpars %>% 
   group_by(parameter, condition) %>% 
@@ -532,13 +533,16 @@ Same as a figure.
 ```{r, out.width="100%", fig.width = 9.5, fig.asp=0.4}
 
 pr2 <- comppars %>% 
-  ggplot(aes(x = estimate, y = condition)) +
+  ggplot(aes(x = estimate)) +
   geom_vline(xintercept = 0, color = "grey", size = 0.6) +
   stat_halfeye() +
   facet_wrap("parameter", scales = "free_x") +
   xlab("Difference from normal speed condition (on probability/proportion scale)") + 
   ylab("   ") +
-  scale_x_continuous(labels = scales::percent_format(1)) 
+  scale_x_continuous(labels = scales::percent_format(1)) +
+  theme(axis.ticks.y = element_blank(), 
+        axis.text.y = element_blank(), 
+        axis.title.y = element_blank())
 
 #pr2 + theme(axis.ticks.y = element_blank())
 
@@ -580,15 +584,20 @@ ggsave(pr2  + theme_bw(base_size = 17) + theme(
 pr2use <- pr2  + theme_bw(base_size = 17) + theme(
     panel.grid.minor.x = element_blank(), 
     panel.grid.major.x = element_blank(),
-    axis.ticks.y = element_blank()
+    panel.grid.minor.y = element_blank(), 
+    panel.grid.major.y = element_blank(),
+    axis.ticks.y = element_blank(),
+    axis.text.y = element_blank(), 
+    axis.title.y = element_blank()
   )
 ```
 
 ```{r}
 ggsave(plot = cowplot::plot_grid(pr1use, pr2use, ncol = 1, 
-                                 rel_heights = c(4.5, 4)), 
+                                 rel_heights = c(4.5, 3.5),
+                                 align = "hv"), 
        filename = "figures/res_speed_both.png", 
-       width = 9.5, height = 8.5)
+       width = 9.5, height = 6.5)
 
 ```
 
@@ -1018,13 +1027,16 @@ pp_check(mnb1, type = "hist", binwidth = 0.025, nsamples = 11, ntrys = 100) +
 ```
 
 ```{r}
-mnb1 %>% 
+pspin1 <- mnb1 %>% 
   emmeans("exp_cond") %>% 
   gather_emmeans_draws() %>% 
   mutate(mean = exp(.value)) %>% 
+  ungroup %>% 
+  mutate(exp_cond = factor(exp_cond, labels = cond_labels)) %>% 
   ggplot(aes(y = exp_cond, x = mean)) +
   stat_halfeye() +
   ylab(ylabel) + xlab("Predicted mean number of spins")
+pspin1
 ```
 
 ```{r}
@@ -1037,18 +1049,51 @@ mnb1 %>%
 
 
 ```{r}
-mnb1 %>% 
+pspin2 <- mnb1 %>% 
   emmeans("exp_cond") %>% 
   gather_emmeans_draws() %>% 
   mutate(mean = exp(.value)) %>% 
   compare_levels(mean, exp_cond) %>% 
   ggplot(aes(x = mean)) +
+  geom_vline(xintercept = 0, color = "grey", size = 0.6) +
   stat_halfeye() +
   labs(x = "Difference in mean number of spins", y = "") +
   theme(axis.ticks.y = element_blank(), 
         axis.text.y = element_blank(), 
-        axis.title.y = element_blank())
+        axis.title.y = element_blank(), 
+        panel.grid.major.y = element_blank(),
+        panel.grid.minor.y = element_blank())
+pspin2
 ```
+
+```{r}
+mnb1 %>% 
+  emmeans("exp_cond") %>% 
+  gather_emmeans_draws() %>% 
+  mutate(mean = exp(.value)) %>% 
+  compare_levels(mean, exp_cond) %>% 
+  median_qi()
+```
+
+```{r}
+mnb1 %>% 
+  emmeans("exp_cond") %>% 
+  gather_emmeans_draws() %>% 
+  mutate(mean = exp(.value)) %>% 
+  compare_levels(mean, exp_cond) %>% 
+  summarise(prop_larger_0 = mean(mean > 0))
+```
+
+
+```{r}
+pspin <- cowplot::plot_grid(
+  pspin1, pspin2, rel_widths = c(1.5, 1)
+  )
+ggsave(plot = pspin, 
+       filename = "figures/res_spins.png", 
+       width = 7.5, height = 2.5)
+```
+
 
 # Model 2 With PGSI
 
@@ -1294,27 +1339,74 @@ post_moi_oi <- moib %>%
 
 post_both <- left_join(post_moi_mu, post_moi_oi) %>%
   pivot_longer(c(mu, oi), names_to = "parameter", values_to = "value") %>%
+  ungroup %>% 
   mutate(parameter = factor(parameter, levels = c("mu", "oi"), 
-                            labels = c("Mean bet size", "Bet maximum"))) 
-ggplot(post_both, aes(x = value, y = exp_cond)) +
+                            labels = c("Mean bet size", "Bet maximum")),
+         exp_cond = factor(exp_cond, labels = cond_labels)) 
+pav1 <- ggplot(post_both, aes(x = value, y = exp_cond)) +
   stat_halfeye() +
   facet_wrap("parameter", scales = "free_x") +
-  ylab(ylabel) + xlab("Probability/Proportion")
+  ylab(ylabel) + xlab("Proportion/Probability")  +
+  scale_x_continuous(labels = scales::percent_format(1))
+pav1
 ```
+
+```{r}
+post_both %>% 
+  group_by(parameter, exp_cond) %>% 
+  median_qi(value)
+```
+
 
 Difference distribution:
 
 ```{r}
-post_both %>%
+pav2 <- post_both %>%
   group_by(parameter) %>% 
   compare_levels(value, exp_cond) %>% 
   ggplot(aes(value)) +
+  geom_vline(xintercept = 0, color = "grey", size = 0.6) +
   stat_halfeye() +
   facet_wrap("parameter", scales = "free_x") +
   labs(x = "Differences in average bet sizes", y = "") +
   theme(axis.ticks.y = element_blank(), 
         axis.text.y = element_blank(), 
-        axis.title.y = element_blank())
+        axis.title.y = element_blank(),
+        panel.grid.minor.y = element_blank(), 
+        panel.grid.major.y = element_blank()) +
+  scale_x_continuous(labels = scales::percent_format(1))
+pav2
+```
+
+```{r}
+post_both %>%
+  group_by(parameter) %>% 
+  compare_levels(value, exp_cond) %>% 
+  median_qi
+```
+
+
+```{r}
+pav2 <- post_both %>%
+  group_by(parameter) %>% 
+  compare_levels(value, exp_cond) %>% 
+  ggplot(aes(value)) +
+  geom_vline(xintercept = 0, color = "grey", size = 0.6) +
+  stat_halfeye() +
+  facet_wrap("parameter", scales = "free_x", ncol = 1) +
+  labs(x = "Differences in average bet sizes", y = "") +
+  theme(axis.ticks.y = element_blank(), 
+        axis.text.y = element_blank(), 
+        axis.title.y = element_blank(),
+        panel.grid.minor.y = element_blank(), 
+        panel.grid.major.y = element_blank()) +
+  scale_x_continuous(labels = scales::percent_format(1))
+pav2
+
+ggsave(plot = cowplot::plot_grid(pav1, pav2, rel_widths = c(2.25, 1)),
+       filename = "figures/res_size.png", 
+       width = 7.5, height = 3.5)
+
 ```
 
 # Model 3 with PGSI
