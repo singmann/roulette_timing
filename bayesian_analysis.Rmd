@@ -239,24 +239,50 @@ binom.confint(nrow(part2) - sum(part2$new_prop == 0), nrow(part2))
 
 ## Numbers of Spins
 
-The `l0` variables refer to the subset of participants who made at least 1 spin (i.e., number of spinds is larger than zero).
+The `l0` variables refer to the subset of participants who made at least 1 spin (i.e., number of spins is larger than zero).
 
 ```{r}
 part2 %>% 
-  summarise(mean = mean(amount),
-            sd = sd(amount),
-            mean_l0 = mean(amount[amount != 0]),
-            sd_l0 = sd(amount[amount != 0]))
+  summarise(mean = mean(bet_count),
+            median = median(bet_count),
+            sd = sd(bet_count),
+            mean_l0 = mean(bet_count[bet_count != 0]),
+            median_l10 = median(bet_count[bet_count != 0]),
+            sd_l0 = sd(bet_count[bet_count != 0])) %>% 
+  round(1)
 ```
 
 ```{r}
 part2 %>% 
   group_by(exp_cond) %>% 
-  summarise(mean = mean(amount),
-            sd = sd(amount),
-            mean_l0 = mean(amount[amount != 0]),
-            sd_l0 = sd(amount[amount != 0]))
+  summarise(mean = mean(bet_count),
+            sd = sd(bet_count),
+            mean_l0 = mean(bet_count[bet_count != 0]),
+            sd_l0 = sd(bet_count[bet_count != 0]))
 ```
+
+The following shows the top 10 largest bet counts (`n` is the number of participants with this bet count):
+
+```{r}
+part2 %>% 
+  group_by(exp_cond) %>% 
+  count(bet_count) %>% 
+  arrange(desc(bet_count))
+```
+
+Proportion of participants with that many spins:
+
+```{r}
+part2 %>% 
+  filter(bet_count != 0) %>% 
+  group_by(exp_cond) %>% 
+  summarise(only1 = mean(bet_count == 1),
+            morethan1 = mean(bet_count > 1),
+            upto2 = mean(bet_count <= 2),
+            only2 = mean(bet_count == 2),
+            morethan2 = mean(bet_count > 2))
+```
+
 
 
 ## Average bet size
