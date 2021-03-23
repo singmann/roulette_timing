@@ -162,6 +162,7 @@ pgsi %>%
 ```
 
 
+
 ## Distribution of Betting Times
 
 We considered the time participants took for each round of roulette starting with the second round (as this was the first round to which the 1 minute slow down applied).
@@ -287,17 +288,42 @@ part2 %>%
 
 ## Average bet size
 
+The following table shows the average bet sizes across all bets (and not across participants):
+
+```{r}
+bets %>% 
+  filter(ppt_id %in% part2$ppt_id) %>% 
+  summarise(mean = mean(abs(total_amt_bet)),
+            sd = sd(abs(total_amt_bet)),
+            n = n())
+```
+
+```{r}
+select(part2, ppt_id, exp_cond) %>% 
+  right_join(bets, by = "ppt_id") %>% 
+  filter(ppt_id %in% part2$ppt_id) %>% 
+  filter(!is.na(exp_cond)) %>% 
+  group_by(exp_cond) %>% 
+  summarise(mean = mean(abs(total_amt_bet)),
+            sd = sd(abs(total_amt_bet)), 
+            n = n())
+```
+
+The following tables show the averages of the participant average bet sizes (i.e., averages of averages):
+
 ```{r}
 part2 %>% 
   summarise(mean = mean(average, na.rm = TRUE),
-            sd = sd(average, na.rm = TRUE))
+            sd = sd(average, na.rm = TRUE), 
+            n = n())
 ```
 
 ```{r}
 part2 %>% 
   group_by(exp_cond) %>% 
   summarise(mean = mean(average, na.rm = TRUE),
-            sd = sd(average, na.rm = TRUE))
+            sd = sd(average, na.rm = TRUE), 
+            n = n())
 ```
 
 # Model 1: Zero-One Inflated Beta Regression on Proportion Bet
