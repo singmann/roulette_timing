@@ -159,6 +159,20 @@ pgsi %>%
             sd = sd(pgsi),
             perc_larger_7 = mean(pgsi > 7)) 
 #options(pillar.sigfig = 3)
+pgsi %>% 
+  mutate(bin = case_when(
+    pgsi == 0 ~ "no risk (0)",
+    pgsi <= 2 ~ "low risk (1 - 2)",
+    pgsi <= 7 ~ "moderate risk (3 - 7)",
+    pgsi > 7 ~ "problem gambler (> 7)",
+    TRUE ~ "ERROR"
+  )) %>% 
+  mutate(bin = factor(bin, levels = c(
+    "no risk (0)", "low risk (1 - 2)", "moderate risk (3 - 7)", "problem gambler (> 7)"
+  ))) %>% 
+  count(bin) %>% 
+  mutate(prob = n / sum(n))
+
 ```
 
 
