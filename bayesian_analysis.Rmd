@@ -129,6 +129,9 @@ part2 <- left_join(part2, pgsi) %>%
 ```
 
 # Descrptive Statistics
+
+Note that the descriptives do not need to match the results from the models below.
+
 ## Payed bonus
 
 Overall bonus paid out was:
@@ -1474,6 +1477,40 @@ ggsave(plot = cowplot::plot_grid(pav1, pav2, rel_widths = c(2.25, 1)),
        width = 7.5, height = 3.5)
 
 ```
+
+We can also re-transforming the model estimates to the £-scale. This gives the following two numbers:
+
+```{r, message=FALSE}
+mot_re <- post_both %>% 
+  pivot_wider(names_from = parameter, values_from = value, names_repair = "universal") %>% 
+  mutate(pred_mean = (1 - Bet.maximum) * (Mean.bet.size * 2) + Bet.maximum*2) 
+
+mot_re %>% 
+  group_by(exp_cond) %>% 
+  median_qi(pred_mean)
+```
+
+Of course, we can also look at the corresponding difference distribution:
+
+```{r, fig.width=3, fig.height=2.5}
+mot_re_diff <- mot_re %>% 
+  compare_levels(pred_mean, exp_cond) 
+
+mot_re_diff %>% 
+  median_qi(pred_mean)
+
+mot_re_diff %>% 
+  ggplot(aes(pred_mean)) +
+  geom_vline(xintercept = 0, color = "grey", size = 0.6) +
+  stat_halfeye() +
+  labs(x = "Difference in average bet size in £", y = "") +
+  theme(axis.ticks.y = element_blank(), 
+        axis.text.y = element_blank(), 
+        axis.title.y = element_blank(),
+        panel.grid.minor.y = element_blank(), 
+        panel.grid.major.y = element_blank())
+```
+
 
 # Model 3 with PGSI
 
