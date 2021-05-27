@@ -474,12 +474,9 @@ ggsave(plot = pp1, filename = "figures/ppp.png", width = 8, height = 6)
 
 ```
 
-## Model Estimates
-
-We first give the table showing the posterior means and 95% CIs.
+## Combined Estimates
 
 ```{r, warning=FALSE}
-
 lpars <- mzoib %>% 
   gather_draws(`b_.*`, regex = TRUE) %>% 
   filter(.variable != "b_phi_Intercept") %>% 
@@ -507,7 +504,63 @@ condpars <- lpars %>%
     levels = c("g", "f", "mu"), 
     labels = par_labels)) %>% 
   mutate(condition = factor(condition, labels = cond_labels))
+levels(condpars$parameter)
 
+est_c <- condpars %>% 
+  pivot_wider(id_cols = c(.chain, .iteration, .draw, condition), 
+              names_from = parameter, values_from = estimate) %>% 
+  mutate(
+    overall = `Gamble at all?` * `Gamble everything?` + 
+      `Gamble at all?` * (1 - `Gamble everything?`) * `Proportion bet?`
+           )
+est_c %>% 
+  group_by(condition) %>% 
+  mean_qi(overall)
+  
+est_c %>% 
+  compare_levels(overall, condition) %>% 
+  mean_qi(overall)
+
+```
+
+
+```{r, out.width="100%", fig.width = 8.0, fig.asp = 0.4}
+op1 <- est_c %>% 
+  ggplot(aes(x = overall, y = condition)) +
+  #stat_histintervalh(breaks = 40) +
+  stat_halfeye() +
+  xlab("Overall proportion bet") + ylab(ylabel) +
+  scale_x_continuous(labels = scales::percent_format(1))
+op2 <- est_c %>% 
+  compare_levels(overall, condition) %>% 
+  ggplot(aes(x = overall)) +
+  geom_histogram(aes(overall, after_stat(density)), binwidth = 0.001, color = "grey") +
+  stat_pointinterval() +
+  geom_density(aes(overall)) +
+  stat_function(fun = dnorm, n = 101, args = list(mean = 0, sd = c(0.05)), 
+                mapping =  aes(color = "SD = 0.05")) +
+  stat_function(fun = dnorm, n = 101, args = list(mean = 0, sd = c(0.1)), 
+                mapping =  aes(color = "SD = 0.1")) +
+  stat_function(fun = dnorm, n = 101, args = list(mean = 0, sd = c(0.25)), 
+                mapping =  aes(color = "SD = 0.25")) +
+  geom_vline(xintercept = 0, color = "darkgrey", size = 0.6) +
+  xlab("Difference in overall proportion bet") + ylab("") +
+  scale_x_continuous(labels = scales::percent_format(1)) +
+  theme(axis.text.y = element_blank(), 
+        axis.ticks.y = element_blank(), 
+        panel.grid.major.y = element_blank(), 
+        panel.grid.minor.y = element_blank()
+        ) +
+  guides(colour = guide_legend("Prior widths"))
+cowplot::plot_grid(op1, op2)
+```
+
+
+## Individual Model Estimates
+
+We first give the table showing the posterior means and 95% CIs.
+
+```{r, warning=FALSE}
 condpars %>% 
   group_by(parameter, condition) %>% 
   mean_qi()
