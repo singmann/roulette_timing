@@ -9,6 +9,9 @@ output:
 ---
 
 ```{r setup, include=FALSE}
+library("checkpoint")
+checkpoint("2021-10-20")
+
 knitr::opts_chunk$set(echo = FALSE)
 knitr::opts_chunk$set(dpi=200, out.width="70%", fig.asp = 0.618,
                       fig.width=4, fig.align = "center")
@@ -22,8 +25,17 @@ if (Sys.info()[['sysname']] == "Windows") {
   options(mc.cores = parallel::detectCores()) # fitting uses multicore by default
 }
 
-
 ```
+
+```{r check-file-structure, include=FALSE}
+if (!dir.exists("model_fits")) {
+  dir.create("model_fits")
+}
+if (!dir.exists("figures")) {
+  dir.create("figures")
+}
+```
+
 
 # Preparation
 
@@ -426,13 +438,13 @@ summary(mzoib)
 As a visual convergence check, we plot the density and trace plots for the four intercept parameters representing the normal speed condition or the overall mean (for `phi`).
 
 ```{r, fig.asp=1.2}
-plot(mzoib, pars = "Intercept")
+plot(mzoib, variable = "Intercept", regex = TRUE)
 ```
 
 We can also plot the three parameters showing the difference distribution of the slowed down condition from the normal speed condition. These differences are given on the logit scale.
 
 ```{r, fig.asp=1.0}
-plot(mzoib, pars = "_condSloweddown")
+plot(mzoib, variable = "_condSlowedMdown", regex = TRUE)
 ```
 
 
@@ -454,19 +466,19 @@ posterior_predict_zoib2 <- function(i, prep, ...) {
   coi <- brms:::get_dpar(prep, "coi", i)
   mu <- brms:::get_dpar(prep, "mu", i = i)
   phi <- brms:::get_dpar(prep, "phi", i = i)
-  hu <- runif(prep$nsamples, 0, 1)
-  hu2 <- runif(prep$nsamples, 0, 1)
+  hu <- runif(prep$ndraws, 0, 1)
+  hu2 <- runif(prep$ndraws, 0, 1)
   #one_or_zero <- runif(prep$nsamples, 0, 1)
   ifelse(hu > zi, 0, 
     ifelse(hu2 < coi, 1, 
-           rbeta(prep$nsamples, shape1 = mu * phi, shape2 = (1 - mu) * phi)
+           rbeta(prep$ndraws, shape1 = mu * phi, shape2 = (1 - mu) * phi)
   ))
 }
 
 ```
 
 ```{r, fig.width=6, out.width="100%"}
-pp1 <- pp_check(mzoib, type = "hist", binwidth = 0.025, nsamples = 11) +
+pp1 <- pp_check(mzoib, type = "hist", binwidth = 0.025, ndraws = 11) +
   coord_cartesian(ylim = c(0, 350)) +
   theme(legend.position = "none")
 pp1
@@ -485,7 +497,7 @@ lpars <- mzoib %>%
   filter(.variable != "b_phi_Intercept") %>% 
   mutate(type = case_when(
     str_detect(.variable, "Intercept") ~ "Intercept",
-    str_detect(.variable, "_condSloweddown") ~ "slowed"
+    str_detect(.variable, "_condSlowedMdown") ~ "slowed"
   )) %>%  
   mutate(parameter = case_when(
     str_detect(.variable, "zipp") ~ "g",
@@ -526,7 +538,7 @@ part2 %>%
 The following is the main results figure on the level of condition.
 
 
-```{r, out.width="100%", fig.width = 9.5}
+```{r, out.width="100%", fig.width = 9, fig.asp=0.55}
 ## plots in which CIs sizes are relative to each other.
 tmp <- condpars %>% 
   group_by(parameter, condition) %>% 
@@ -599,7 +611,7 @@ comppars %>%
 Same as a figure.
 
 
-```{r, out.width="100%", fig.width = 9.5, fig.asp=0.4}
+```{r, out.width="100%", fig.width = 9, fig.asp=0.4}
 
 pr2 <- comppars %>% 
   ggplot(aes(x = estimate)) +
@@ -672,26 +684,39 @@ ggsave(plot = cowplot::plot_grid(pr1use, pr2use, ncol = 1,
 
 ## Difference Distributions with Possible Priors
 
-The following plot shows all the difference distributions with overlayed density estimate (in black) and some possible prior distributions in colour (note again that the model did not actually include any priors). These priors are normal priors (who have a higher peak at 0 compared to Cauchy and t) with two different SDs.
+The following plot shows the estimated difference of the regular from the slowed down condition with overlaid density estimate (in black) and some possible prior distributions in colour (note again that the model did not actually include any priors). These differences are shown on the linear scale before applying the logistic link function. These priors are normal priors (who have a higher peak at 0 compared to Cauchy and t) with different SDs.
 
-```{r, out.width="100%", fig.width=8, fig.asp=0.3, warning=FALSE}
-comppars %>% 
-  ggplot() +
-  geom_histogram(aes(estimate, after_stat(density)), binwidth = 0.001) +
-  geom_density(aes(estimate)) +
-  stat_function(fun = dnorm, n = 101, args = list(mean = 0, sd = c(0.05)), 
-                mapping =  aes(color = "SD = 0.05")) +
-  stat_function(fun = dnorm, n = 101, args = list(mean = 0, sd = c(0.1)), 
-                mapping =  aes(color = "SD = 0.1")) +
-  stat_function(fun = dnorm, n = 101, args = list(mean = 0, sd = c(0.25)), 
-                mapping =  aes(color = "SD = 0.25")) +
-  geom_vline(xintercept = 0, color = "grey") +
-  facet_grid(rows = vars(condition), 
-             cols = vars(parameter), scales = "free_x") + 
-  guides(colour = guide_legend("prior width"))
+```{r}
+prior_pars <- lpars %>% 
+  filter(type != "Intercept") %>% 
+  mutate(parameter = factor(
+    x = parameter, 
+    levels = c("g", "f", "mu"), 
+    labels = par_labels)) 
+# prior_pars %>% 
+#   unique(.$.variable)
 ```
 
-Note that a prior with SD of .05 means that we expect with 95% probability that the largest effect we observe is `r scales::percent(plogis(0.05 *2) - 0.5, accuracy = 0.01)` on the response scale.
+```{r, out.width="100%", fig.width=6, warning=FALSE, fig.asp=0.4}
+prior_plot <- prior_pars %>% 
+  ggplot() +
+  geom_histogram(aes(.value, after_stat(density)), binwidth = 0.001) +
+  geom_density(aes(.value)) +
+  stat_function(fun = dnorm, n = 101, args = list(mean = 0, sd = c(0.25)), 
+                mapping =  aes(color = "SD = 0.25")) +
+  stat_function(fun = dnorm, n = 101, args = list(mean = 0, sd = c(0.5)), 
+                mapping =  aes(color = "SD = 0.5")) +
+  stat_function(fun = dnorm, n = 101, args = list(mean = 0, sd = c(1)), 
+                mapping =  aes(color = "SD = 1.00")) +
+  geom_vline(xintercept = 0, color = "grey") +
+  facet_grid(cols = vars(parameter), rows = vars("No message vs. yellow"),scales = "free_x") + 
+  guides(colour = guide_legend("prior width")) +
+  labs(x = "estimate on linear scale") +
+  ggsci::scale_color_lancet()
+prior_plot
+```
+
+In this figure we considered three prior width. For a prior width of SD = 0.25 we expect with 95% that the largest possible effect we observe is `r scales::percent(plogis(qnorm(0.975) * 0.25) - 0.5, accuracy = 0.01)` on the response scale. For a prior width of SD = 0.5 we expect with 95% that the largest possible effect we observe is `r scales::percent(plogis(qnorm(0.975) * 0.5) - 0.5, accuracy = 0.01)` on the response scale. For a prior width of SD = 0.5 we expect with 95% that the largest possible effect we observe is `r scales::percent(plogis(qnorm(0.975) * 1) - 0.5, accuracy = 0.01)` on the response scale.
 
 # Model 1 With PGSI
 
@@ -748,13 +773,13 @@ summary(mzoib2)
 As a visual convergence check, we plot the density and trace plots for the four intercept parameters representing the normal speed condition or the overall mean (for `phi`).
 
 ```{r, fig.asp=1.2}
-plot(mzoib2, pars = "Intercept")
+plot(mzoib, variable = "Intercept", regex = TRUE)
 ```
 
 We can also plot the three parameters showing the difference distribution of the slowed down condition from the normal speed condition. These differences are given on the logit scale.
 
 ```{r, fig.asp=1.0}
-plot(mzoib2, pars = "_condSloweddown")
+plot(mzoib2, variable = "_condSlowedMdown", regex = TRUE)
 ```
 
 
@@ -764,7 +789,7 @@ get_variables(mzoib2)
 ```
 
 ```{r, fig.width=6, out.width="100%"}
-pp_check(mzoib2, type = "hist", binwidth = 0.025, nsamples = 11) +
+pp_check(mzoib2, type = "hist", binwidth = 0.025, ndraws = 11) +
   coord_cartesian(ylim = c(0, 350))
 ```
 
@@ -778,7 +803,7 @@ lpars <- mzoib2 %>%
   filter(!str_detect(.variable, "pgsi|motives")) %>% 
   mutate(type = case_when(
     str_detect(.variable, "Intercept") ~ "Intercept",
-    str_detect(.variable, "condSloweddown") ~ "slowed"
+    str_detect(.variable, "condSlowedMdown") ~ "slowed"
   )) %>%  
   mutate(parameter = case_when(
     str_detect(.variable, "zipp") ~ "g",
@@ -817,7 +842,7 @@ condpars %>%
 ```
 
 
-```{r, out.width="100%", fig.width=6, fig.asp=0.55}
+```{r, out.width="100%", fig.width=6, fig.asp=0.45}
 comppars <- condpars %>% 
   group_by(parameter) %>% 
   compare_levels(estimate, by = condition) %>% 
@@ -829,7 +854,7 @@ comppars %>%
   mean_qi()
 
 comppars %>% 
-  ggplot(aes(x = estimate, y = condition)) +
+  ggplot(aes(x = estimate)) +
   geom_vline(xintercept = 0, color = "grey", size = 0.6) +
   stat_halfeye() +
   facet_wrap("parameter", scales = "free_x") +
@@ -880,7 +905,8 @@ part2 %>%
 ```{r}
 
 part2 <- part2 %>% 
-  mutate(gamble_cat = if_else(new_prop == 1, "all", if_else(new_prop == 0, "none", "some"))) %>% 
+  mutate(gamble_cat = if_else(new_prop == 1, "all", 
+                              if_else(new_prop == 0, "none", "some"))) %>% 
   mutate(gamble_cat = factor(gamble_cat, levels = c("none", "some", "all")))
 #library("ggbeeswarm")
 
@@ -953,13 +979,13 @@ summary(mzoib3)
 As a visual convergence check, we plot the density and trace plots for the four intercept parameters representing the normal speed condition or the overall mean (for `phi`).
 
 ```{r, fig.asp=1.2}
-plot(mzoib3, pars = "Intercept")
+plot(mzoib3, variable = "Intercept", regex = TRUE)
 ```
 
 We can also plot the three parameters showing the difference distribution of the slowed down condition from the normal speed condition. These differences are given on the logit scale.
 
 ```{r, fig.asp=1.0}
-plot(mzoib3, pars = "_condSloweddown$")
+plot(mzoib3, variable = "_condSlowedMdown$", regex = TRUE)
 ```
 
 
@@ -968,7 +994,7 @@ get_variables(mzoib3)
 ```
 
 ```{r, fig.width=6, out.width="100%"}
-pp_check(mzoib3, type = "hist", binwidth = 0.025, nsamples = 11) +
+pp_check(mzoib3, type = "hist", binwidth = 0.025, ndraws = 11) +
   coord_cartesian(ylim = c(0, 350))
 ```
 
@@ -982,7 +1008,7 @@ lpars <- mzoib3 %>%
   filter(!str_detect(.variable, "pgsi|motives")) %>% 
   mutate(type = case_when(
     str_detect(.variable, "Intercept") ~ "Intercept",
-    str_detect(.variable, "condSloweddown") ~ "slowed"
+    str_detect(.variable, "condSlowedMdown") ~ "slowed"
   )) %>%  
   mutate(parameter = case_when(
     str_detect(.variable, "zipp") ~ "g",
@@ -1085,13 +1111,13 @@ plot(mnb1)
 The data seems to be well described by the model.
 
 ```{r, fig.width=6, out.width="100%", warning=FALSE}
-pp_check(mnb1, type = "hist", binwidth = 0.025, nsamples = 11, ntrys = 100) 
+pp_check(mnb1, type = "hist", binwidth = 0.025, ndraws = 11, ntrys = 100) 
 ```
 
 When we zoom in (i.e., ignore data points above 50 for the plot), we can see the that the real and synthetic data match quite well.
 
 ```{r, fig.width=6, out.width="100%", warning=FALSE}
-pp_check(mnb1, type = "hist", binwidth = 0.025, nsamples = 11, ntrys = 100) +
+pp_check(mnb1, type = "hist", binwidth = 0.025, ndraws = 11, ntrys = 100) +
   coord_cartesian(xlim = c(0, 50))
 ```
 
@@ -1378,10 +1404,10 @@ posterior_predict_oib <- function(i, prep, ...) {
   oi <- brms:::get_dpar(prep, "oi", i)
   mu <- brms:::get_dpar(prep, "mu", i = i)
   phi <- brms:::get_dpar(prep, "phi", i = i)
-  hu <- runif(prep$nsamples, 0, 1)
+  hu <- runif(prep$ndraws, 0, 1)
   #one_or_zero <- runif(prep$nsamples, 0, 1)
   ifelse(hu < oi, 1, 
-         rbeta(prep$nsamples, shape1 = mu * phi, shape2 = (1 - mu) * phi)
+         rbeta(prep$ndraws, shape1 = mu * phi, shape2 = (1 - mu) * phi)
   )
 }
 
@@ -1390,7 +1416,7 @@ posterior_predict_oib <- function(i, prep, ...) {
 When comparing the actual data with synthetic data from the model, we can see an obvious problem due to the use of prominent numbers. Whereas the peak at 1 is nicely recovered by the model, the other peaks are not. However, the overall shape of the synthetic data is at least similar to the shape of the observed data.
 
 ```{r, fig.width=6, out.width="100%"}
-pp_check(moib, type = "hist", binwidth = 0.025, nsamples = 11) 
+pp_check(moib, type = "hist", binwidth = 0.025, ndraws = 11) 
 ```
 
 ```{r}
@@ -1482,7 +1508,9 @@ We can also re-transforming the model estimates to the £-scale. This gives the 
 
 ```{r, message=FALSE}
 mot_re <- post_both %>% 
-  pivot_wider(names_from = parameter, values_from = value, names_repair = "universal") %>% 
+  pivot_wider(names_from = parameter, 
+              values_from = value, 
+              names_repair = "universal") %>% 
   mutate(pred_mean = (1 - Bet.maximum) * (Mean.bet.size * 2) + Bet.maximum*2) 
 
 mot_re %>% 
@@ -1541,8 +1569,8 @@ save(moib2, file = tmp_model_filename, compress = "xz")
 summary(moib2)
 ```
 
-```{r, fig.asp=1.0}
-plot(moib2, pars = "Sloweddown|pgsi")
+```{r, fig.asp=1.33}
+plot(moib2, variables = "Sloweddown|pgsi", regex = TRUE, N = 6)
 ```
 
 ```{r}
@@ -1610,8 +1638,7 @@ save(moib3, file = tmp_model_filename, compress = "xz")
 summary(moib3)
 ```
 
-```{r, fig.asp=1.0}
-plot(moib3, pars = "Sloweddown|pgsi")
+```{r, fig.asp=1.5}
 ```
 
 ```{r, message=FALSE}
@@ -1749,7 +1776,7 @@ plot(mrisk2)
 The posterior predictive distribution shows some problems, but at least the shape of the synthetic data is similar to the distribution of the actual data (posterior predictive distributions of a model assuming a Gaussian response distribution was considerably worse and is therefore not included here).
 
 ```{r, fig.width=6, out.width="100%"}
-pp_check(mrisk2, type = "hist", binwidth = 0.05, nsamples = 11)
+pp_check(mrisk2, type = "hist", binwidth = 0.05, ndraws = 11)
 ```
 
 The following tables show the average riskiness per condition and differences from the no warning message group on the fitted scale, i.e., the (0, 1) scale used for the beta regression.
@@ -1761,7 +1788,7 @@ lpars <- mrisk2 %>%
   filter(.variable != "b_phi_Intercept") %>% 
   mutate(type = case_when(
     str_detect(.variable, "Intercept") ~ "Intercept",
-    str_detect(.variable, "condSloweddown") ~ "slowed"
+    str_detect(.variable, "condSlowedMdown") ~ "slowed"
   )) 
 
 condpars <- lpars %>% 
