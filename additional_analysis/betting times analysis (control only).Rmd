@@ -1,0 +1,265 @@
+---
+title: "Betting-Time Analysis (Normal Condition Only)"
+author: "analysis done by Henrik Singmann (singmann@gmail.com)"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output: 
+  html_document:
+    toc: true
+    toc_float: true
+---
+
+```{r setup, include=FALSE}
+# library("checkpoint")
+# checkpoint("2021-10-20")
+
+knitr::opts_chunk$set(echo = FALSE)
+knitr::opts_chunk$set(dpi=200, out.width="70%", fig.asp = 0.618,
+                      fig.width=4, fig.align = "center")
+options(width = 110)
+options("dplyr.summarise.inform" = FALSE)
+options(pillar.sigfig = 3)
+
+```
+
+
+# Preparation
+
+```{r, message=FALSE, warning=FALSE, results='hide'}
+library("tidyverse")
+#library("tidylog")
+theme_set(theme_bw() + 
+            theme(panel.grid.major.x = element_blank(), 
+                  panel.grid.minor.x = element_blank()))
+library("brms")
+library("tidybayes")
+library("BayesFactor")
+library("binom")
+library("emmeans")
+par_labels <- c("Gamble at all?", 
+                "Gamble everything?", 
+               "Proportion bet?")
+cond_labels <- c("Normal", "Slowed-down")
+ylabel <- "Gambling speed"
+```
+
+
+```{r, message=FALSE, warning=FALSE}
+participants <- read_csv("../data/participants_anon.csv") %>% 
+  mutate(pptid = factor(ppt_id))
+```
+
+Total participants (NULL = did not pass captchas):
+
+```{r}
+table(participants$exp_cond)
+```
+
+Participants that passed the captchas and finished the study:
+
+```{r}
+participants_red <- participants %>% 
+  filter(progress == "outro", exp_cond != "NULL") %>% 
+  mutate(
+    exp_cond = factor(
+      exp_cond, 
+      levels = c("normal", "delay"),
+      labels = cond_labels
+    ),
+    bonus = as.numeric(bonus), 
+    bet_count = as.numeric(bet_count)
+  ) %>% 
+  droplevels()
+
+part2 <- participants_red %>% 
+  select(ppt_id, exp_cond, bonus, bet_count)
+
+table(participants_red$exp_cond)
+```
+
+```{r, message=FALSE, warning=FALSE, include=FALSE}
+bets <- read_csv("../data/bets_anon.csv") %>% 
+  group_by(ppt_id) %>% 
+  mutate(bet_time = as.numeric(strptime(bet_time, format="%H:%M:%S"))) %>% 
+  mutate(timep = lag(bet_time)) %>% 
+  mutate(time = bet_time - timep) %>% 
+  #select(ppt_id:bet_time, timep, time) %>% 
+  ungroup
+
+bets2 <- bets %>% 
+  group_by(ppt_id) %>% 
+  summarise(amount = sum(abs(total_amt_bet)), 
+            average = mean(abs(total_amt_bet)),
+            total_win = sum(win), 
+            average_time = mean(time, na.rm = TRUE)) 
+
+part2 <- left_join(part2, bets2) %>% 
+  mutate(amount = if_else(is.na(amount), 0, amount),
+         total_win = if_else(is.na(total_win), 0, total_win)) %>% 
+  mutate(new_prop = amount/ (3 + total_win)) %>% 
+  mutate(new_prop = if_else(new_prop > 1, 1, new_prop)) ## necessary: few values are just above 1
+```
+
+```{r, message=FALSE, warning=FALSE}
+
+covariates <- read_csv("../data/questions_anon.csv") %>% 
+  mutate(across(starts_with("PGSI"), ~case_when(
+    . == "Never" ~ 0,
+    . == "Sometimes" ~ 1,
+    . == "MostTime" ~ 2, 
+    . == "Always" ~ 3, 
+    TRUE ~ NA_real_))) %>% 
+  mutate(pptid = factor(ppt_id)) 
+# map(covariates[,-1], ~sort(unique(.)))
+## PGSI
+# 0 = never
+# 1 = sometimes
+# 2 = most often / often
+# 3 = always
+pgsi <- covariates %>% 
+  #select(-starts_with("Motives")) %>% 
+  pivot_longer(starts_with("PGSI")) %>% 
+  group_by(ppt_id) %>% 
+  summarise(pgsi = sum(value))
+
+part2 <- left_join(part2, pgsi) %>% 
+  mutate(pgsi_c = pgsi - mean(pgsi))
+
+pgsi <- part2 %>% 
+  select(ppt_id, exp_cond) %>% 
+  left_join(pgsi)
+```
+
+All following analysis only use the normal (i.e., not slowed down) condition.
+
+# Distribution of Betting Times 
+
+We considered the time participants took for each round of roulette starting with the second round (as this was the first round to which the 1 minute slow down applied).
+
+The first graph shows the distribution of individual betting times in seconds when restricting the shown range to up to 150 seconds. The first vertical line shows the overall median and the second line the overall mean (which as expected is strongly affected by the outliers on the right side).
+
+```{r, message=FALSE}
+bet_times <- bets %>% 
+  left_join(select(part2, ppt_id, exp_cond)) %>% 
+  filter(ppt_id %in% part2$ppt_id) %>% 
+  filter(!is.na(time)) %>% 
+  filter(exp_cond == "Normal")
+
+bet_times %>% 
+  ggplot(aes(time)) +
+  geom_vline(xintercept = mean(bet_times$time), color = "grey") +
+  geom_vline(xintercept = median(bet_times$time), color = "grey") +
+  geom_histogram(binwidth = 5, boundary = 0) +
+  facet_wrap("exp_cond") +
+  coord_cartesian(xlim = c(0, 150))
+```
+
+This plot excludes a few very long betting times.
+
+```{r}
+bet_times %>% 
+  filter(time > 300) %>% 
+  select(ppt_id, exp_cond, time)
+
+nib <- bet_times %>% 
+  filter(time < 300, time > 150)
+
+
+```
+
+We can also look at some overall statistics of the betting times:
+```{r}
+options(pillar.sigfig = 4)
+bet_times %>% 
+  group_by(exp_cond) %>% 
+  summarise(across(
+    time, 
+    .fns = list(mean = mean, 
+                median = median, 
+                sd = sd, 
+                IQR = IQR)))
+options(pillar.sigfig = 3)
+```
+
+Let's take a look how the mean changes when using certain exclusion cut-offs (`co`):
+
+
+```{r}
+options(pillar.sigfig = 4)
+bet_times %>% 
+  group_by(exp_cond) %>% 
+  summarise(
+    m_co_150 = mean(time[time < 150]),
+    m_co_120 = mean(time[time < 120]),
+    m_co_100 = mean(time[time < 100]),
+    m_co_90 = mean(time[time < 90]),
+    m_co_80 = mean(time[time < 80]),
+    m_co_75 = mean(time[time < 75]),
+    m_co_60 = mean(time[time < 60]),
+    m_co_50 = mean(time[time < 50])
+  )
+options(pillar.sigfig = 3)
+```
+
+These exclusion criteria would lead to the following proportions of excluded observations:
+
+```{r}
+bet_times %>% 
+  group_by(exp_cond) %>% 
+  summarise(
+    prop_co_150 = mean(time > 150),
+    prop_co_120 = mean(time > 120),
+    prop_co_100 = mean(time > 100),
+    prop_co_90 = mean(time > 90),
+    prop_co_80 = mean(time > 80),
+    prop_co_75 = mean(time > 75),
+    prop_co_60 = mean(time > 60),
+    prop_co_50 = mean(time > 50)
+  ) %>% 
+  pivot_longer(cols = -exp_cond, 
+               names_to = "cut_off", values_to = "prop_excluded")
+  
+
+```
+
+# Distribution of mean betting times across participants
+
+In the following output and plot, the value for `excl` (also given in the panel header) gives the cut-off for individual response times.
+
+```{r, out.width="100%", fig.width=7}
+
+exclusions <- c(Inf, 150, 100, 120, 90,
+                80, 75, 60, 50)
+all_bt <- map_dfr(exclusions, ~mutate(filter(bet_times, time < .), excl = .))
+all_bt_agg <- all_bt %>% 
+  group_by(excl, ppt_id) %>% 
+  summarise(mean_bet_time = mean(time)) 
+all_agg <- all_bt_agg %>% 
+  group_by(excl) %>% 
+  summarise(mean = mean(mean_bet_time),
+            median = median(mean_bet_time),
+            sd = sd(mean_bet_time))
+all_agg
+all_bt_agg %>% 
+  ggplot(aes(x = mean_bet_time)) +
+  geom_histogram(binwidth = 2) +
+  geom_vline(aes(xintercept = mean), data = all_agg) +
+  facet_wrap(vars(excl))
+```
+
+# Modelling mean betting times (cut-off: 90 seconds)
+
+## Normal Model
+
+```{r}
+
+```
+
+
+# Session Info (R and Package Numbers)
+
+```{r}
+options(width = 100)
+sessionInfo()
+```
+
+
