@@ -19,6 +19,18 @@ options(width = 110)
 options("dplyr.summarise.inform" = FALSE)
 options(pillar.sigfig = 3)
 
+if (Sys.info()[['sysname']] == "Windows") {
+  options(mc.cores = 1) 
+} else {
+  options(mc.cores = parallel::detectCores()) # fitting uses multicore by default
+}
+
+```
+
+```{r check-file-structure, include=FALSE}
+if (!dir.exists("model_fits")) {
+  dir.create("model_fits")
+}
 ```
 
 
@@ -246,12 +258,585 @@ all_bt_agg %>%
   facet_wrap(vars(excl))
 ```
 
-# Modelling mean betting times (cut-off: 90 seconds)
+# Modelling mean betting times (no cut-off)
+
+
 
 ## Normal Model
 
-```{r}
+```{r, include=FALSE}
 
+tmp_model_filename <- "model_fits/model_normal_u.rda"
+if (file.exists(tmp_model_filename)) {
+  load(tmp_model_filename)
+} else {
+  m_norm <- brm(time ~ 1 + (1|ppt_id), data = bet_times,
+            iter = 2000, warmup = 1000, chains = 6) ## 100,000 post-warmup
+  save(m_norm, file = tmp_model_filename, compress = "xz")
+}
+
+
+```
+
+```{r}
+summary(m_norm)
+```
+
+```{r, fig.asp=0.9}
+plot(m_norm)
+```
+
+```{r, fig.width=6, out.width="100%"}
+pp1 <- pp_check(m_norm, type = "hist", binwidth = 2, ndraws = 11) +
+  theme(legend.position = "none") 
+pp1
+
+```
+
+## Lognormal Model
+
+```{r, include=FALSE}
+
+tmp_model_filename <- "model_fits/model_lognormal_u.rda"
+if (file.exists(tmp_model_filename)) {
+  load(tmp_model_filename)
+} else {
+  m_lognorm <- brm(time ~ 1 + (1|ppt_id), data = bet_times, 
+                      family = lognormal(),
+                      iter = 2000, warmup = 1000, chains = 6) ## 100,000 post-warmup
+  save(m_lognorm, file = tmp_model_filename, compress = "xz")
+}
+
+
+```
+
+```{r}
+summary(m_lognorm)
+```
+
+```{r, fig.asp=0.9}
+plot(m_lognorm)
+```
+
+```{r, fig.width=6, out.width="100%"}
+pp1 <- pp_check(m_lognorm, type = "hist", binwidth = 2, ndraws = 11) +
+  theme(legend.position = "none")
+pp1
+
+```
+
+
+### Model quantities and Statistics
+Minimum and maximum betting times in the data:
+
+```{r}
+min(bet_times$time)
+max(bet_times$time)
+```
+
+Minimum and maximum in 11 draws from the posterior predictive distribution:
+```{r}
+pp_dat <- posterior_predict(m_lognorm, ndraws = 11)
+apply(pp_dat, 1, min)
+apply(pp_dat, 1, max)
+```
+
+Let's take a look at posterior predicted mean and median
+
+```{r}
+## mean
+apply(pp_dat, 1, mean)
+## median
+apply(pp_dat, 1, median)
+```
+
+
+```{r, include=FALSE, eval=FALSE}
+# calculates posterior linear predictor (mu) and epred (ppp-mean)
+# here we ignore ppt_id, omitted because next part is better
+ttt1 <- tibble(ppt_id = NA) %>% 
+  add_linpred_draws(m_lognorm, value = "mu")
+
+ttt2 <- tibble(ppt_id = NA) %>% 
+  add_epred_draws(m_lognorm) 
+ttt <- left_join(ttt1, ttt2) %>%
+  mutate(expmu = exp(mu), .epred - expmu)
+ttt %>% 
+  mean_hdi(.epred, expmu)
+
+
+```
+
+Calculate predicted mean and predicted median (based on lognormal distribution)
+
+```{r}
+## calculate mean and median by hand
+#get_variables(m_lognorm_90)
+dd <- m_lognorm %>% 
+  spread_draws(b_Intercept, sigma) %>% 
+  mutate(mean = exp(b_Intercept + (sigma^2 / 2)), 
+         median = exp(b_Intercept))
+dd %>% 
+  mean_hdi(mean)
+dd %>% 
+  mean_hdi(median)
+```
+
+## Shifted Lognormal Model
+
+```{r, include=FALSE}
+
+tmp_model_filename <- "model_fits/model_slognormal_u.rda"
+if (file.exists(tmp_model_filename)) {
+  load(tmp_model_filename)
+} else {
+  m_slognorm <- brm(time ~ 1 + (1|ppt_id), data = bet_times, 
+                      family = shifted_lognormal(),
+                      iter = 2000, warmup = 1000, chains = 6) ## 100,000 post-warmup
+  save(m_slognorm, file = tmp_model_filename, compress = "xz")
+}
+
+
+```
+
+```{r}
+summary(m_slognorm)
+```
+
+```{r, fig.asp=1.2}
+plot(m_slognorm)
+```
+
+```{r, fig.width=6, out.width="100%"}
+pp1 <- pp_check(m_slognorm, type = "hist", binwidth = 2, ndraws = 11) +
+  theme(legend.position = "none")
+pp1
+
+```
+
+### Model quantities and Statistics
+Minimum and maximum betting times in the data:
+
+```{r}
+min(bet_times$time)
+max(bet_times$time)
+```
+
+Minimum and maximum in 11 draws from the posterior predictive distribution:
+```{r}
+pp_dat <- posterior_predict(m_slognorm, ndraws = 11)
+apply(pp_dat, 1, min)
+apply(pp_dat, 1, max)
+```
+
+Let's take a look at posterior predicted mean and median
+
+```{r}
+## mean
+apply(pp_dat, 1, mean)
+## median
+apply(pp_dat, 1, median)
+```
+
+
+Calculate predicted mean and predicted median (based on shifted-lognormal distribution)
+
+```{r}
+## calculate mean and median by hand
+#get_variables(m_slognorm_90)[1:20]
+dd_shifted <- m_slognorm %>% 
+  spread_draws(b_Intercept, sigma, ndt) %>% 
+  mutate(mean = ndt + exp(b_Intercept + (sigma^2 / 2)), 
+         median = ndt + exp(b_Intercept))
+dd_shifted %>% 
+  mean_hdi(mean)
+dd_shifted %>% 
+  mean_hdi(median)
+```
+
+
+# Modelling mean betting times (cut-off: 90 seconds)
+
+```{r}
+bet_times_90 <- bet_times %>% 
+  filter(time < 90)
+```
+
+
+## Normal Model
+
+```{r, include=FALSE}
+
+tmp_model_filename <- "model_fits/model_normal_1.rda"
+if (file.exists(tmp_model_filename)) {
+  load(tmp_model_filename)
+} else {
+  m_norm_90 <- brm(time ~ 1 + (1|ppt_id), data = bet_times_90,
+            iter = 2000, warmup = 1000, chains = 6) ## 100,000 post-warmup
+  save(m_norm_90, file = tmp_model_filename, compress = "xz")
+}
+
+
+```
+
+```{r}
+summary(m_norm_90)
+```
+
+```{r, fig.asp=0.9}
+plot(m_norm_90)
+```
+
+```{r, fig.width=6, out.width="100%"}
+pp1 <- pp_check(m_norm_90, type = "hist", binwidth = 2, ndraws = 11) +
+  theme(legend.position = "none") 
+pp1
+
+```
+
+## Lognormal Model
+
+```{r, include=FALSE}
+
+tmp_model_filename <- "model_fits/model_lognormal_1.rda"
+if (file.exists(tmp_model_filename)) {
+  load(tmp_model_filename)
+} else {
+  m_lognorm_90 <- brm(time ~ 1 + (1|ppt_id), data = bet_times_90, 
+                      family = lognormal(),
+                      iter = 2000, warmup = 1000, chains = 6) ## 100,000 post-warmup
+  save(m_lognorm_90, file = tmp_model_filename, compress = "xz")
+}
+
+
+```
+
+```{r}
+summary(m_lognorm_90)
+```
+
+```{r, fig.asp=0.9}
+plot(m_lognorm_90)
+```
+
+```{r, fig.width=6, out.width="100%"}
+pp1 <- pp_check(m_lognorm_90, type = "hist", binwidth = 2, ndraws = 11) +
+  theme(legend.position = "none")
+pp1
+
+```
+
+
+### Model quantities and Statistics
+Minimum and maximum betting times in the data:
+
+```{r}
+min(bet_times_90$time)
+max(bet_times_90$time)
+```
+
+Minimum and maximum in 11 draws from the posterior predictive distribution:
+```{r}
+pp_dat <- posterior_predict(m_lognorm_90, ndraws = 11)
+apply(pp_dat, 1, min)
+apply(pp_dat, 1, max)
+```
+
+Let's take a look at posterior predicted mean and median
+
+```{r}
+## mean
+apply(pp_dat, 1, mean)
+## median
+apply(pp_dat, 1, median)
+```
+
+
+```{r, include=FALSE, eval=FALSE}
+# calculates posterior linear predictor (mu) and epred (ppp-mean)
+# here we ignore ppt_id, omitted because next part is better
+ttt1 <- tibble(ppt_id = NA) %>% 
+  add_linpred_draws(m_lognorm_90, value = "mu")
+
+ttt2 <- tibble(ppt_id = NA) %>% 
+  add_epred_draws(m_lognorm_90) 
+ttt <- left_join(ttt1, ttt2) %>%
+  mutate(expmu = exp(mu), .epred - expmu)
+ttt %>% 
+  mean_hdi(.epred, expmu)
+
+
+```
+
+Calculate predicted mean and predicted median (based on lognormal distribution)
+
+```{r}
+## calculate mean and median by hand
+#get_variables(m_lognorm_90)
+dd <- m_lognorm_90 %>% 
+  spread_draws(b_Intercept, sigma) %>% 
+  mutate(mean = exp(b_Intercept + (sigma^2 / 2)), 
+         median = exp(b_Intercept))
+dd %>% 
+  mean_hdi(mean)
+dd %>% 
+  mean_hdi(median)
+```
+
+## Shifted Lognormal Model
+
+```{r, include=FALSE}
+
+tmp_model_filename <- "model_fits/model_slognormal_1.rda"
+if (file.exists(tmp_model_filename)) {
+  load(tmp_model_filename)
+} else {
+  m_slognorm_90 <- brm(time ~ 1 + (1|ppt_id), data = bet_times_90, 
+                      family = shifted_lognormal(),
+                      iter = 2000, warmup = 1000, chains = 6) ## 100,000 post-warmup
+  save(m_slognorm_90, file = tmp_model_filename, compress = "xz")
+}
+
+
+```
+
+```{r}
+summary(m_slognorm_90)
+```
+
+```{r, fig.asp=1.2}
+plot(m_slognorm_90)
+```
+
+```{r, fig.width=6, out.width="100%"}
+pp1 <- pp_check(m_slognorm_90, type = "hist", binwidth = 2, ndraws = 11) +
+  theme(legend.position = "none")
+pp1
+
+```
+
+### Model quantities and Statistics
+Minimum and maximum betting times in the data:
+
+```{r}
+min(bet_times_90$time)
+max(bet_times_90$time)
+```
+
+Minimum and maximum in 11 draws from the posterior predictive distribution:
+```{r}
+pp_dat <- posterior_predict(m_slognorm_90, ndraws = 11)
+apply(pp_dat, 1, min)
+apply(pp_dat, 1, max)
+```
+
+Let's take a look at posterior predicted mean and median
+
+```{r}
+## mean
+apply(pp_dat, 1, mean)
+## median
+apply(pp_dat, 1, median)
+```
+
+
+Calculate predicted mean and predicted median (based on shifted-lognormal distribution)
+
+```{r}
+## calculate mean and median by hand
+#get_variables(m_slognorm_90)[1:20]
+dd_shifted <- m_slognorm_90 %>% 
+  spread_draws(b_Intercept, sigma, ndt) %>% 
+  mutate(mean = ndt + exp(b_Intercept + (sigma^2 / 2)), 
+         median = ndt + exp(b_Intercept))
+dd_shifted %>% 
+  mean_hdi(mean)
+dd_shifted %>% 
+  mean_hdi(median)
+```
+
+
+# Modelling mean betting times (cut-off: 360 seconds)
+
+```{r}
+bet_times_360 <- bet_times %>% 
+  filter(time < 360)
+```
+
+
+## Normal Model
+
+```{r, include=FALSE}
+
+tmp_model_filename <- "model_fits/model_normal_2.rda"
+if (file.exists(tmp_model_filename)) {
+  load(tmp_model_filename)
+} else {
+  m_norm_360 <- brm(time ~ 1 + (1|ppt_id), data = bet_times_360,
+            iter = 2000, warmup = 1000, chains = 6) ## 100,000 post-warmup
+  save(m_norm_360, file = tmp_model_filename, compress = "xz")
+}
+
+
+```
+
+```{r}
+summary(m_norm_360)
+```
+
+```{r, fig.asp=0.9}
+plot(m_norm_360)
+```
+
+```{r, fig.width=6, out.width="100%"}
+pp1 <- pp_check(m_norm_360, type = "hist", binwidth = 2, ndraws = 11) +
+  theme(legend.position = "none") 
+pp1
+
+```
+
+## Lognormal Model
+
+```{r, include=FALSE}
+
+tmp_model_filename <- "model_fits/model_lognormal_2.rda"
+if (file.exists(tmp_model_filename)) {
+  load(tmp_model_filename)
+} else {
+  m_lognorm_360 <- brm(time ~ 1 + (1|ppt_id), data = bet_times_360, 
+                      family = lognormal(),
+                      iter = 2000, warmup = 1000, chains = 6) ## 100,000 post-warmup
+  save(m_lognorm_360, file = tmp_model_filename, compress = "xz")
+}
+
+
+```
+
+```{r}
+summary(m_lognorm_360)
+```
+
+```{r, fig.asp=0.9}
+plot(m_lognorm_360)
+```
+
+```{r, fig.width=6, out.width="100%"}
+pp1 <- pp_check(m_lognorm_360, type = "hist", binwidth = 2, ndraws = 11) +
+  theme(legend.position = "none")
+pp1
+
+```
+
+
+### Model quantities and Statistics
+Minimum and maximum betting times in the data:
+
+```{r}
+min(bet_times_360$time)
+max(bet_times_360$time)
+```
+
+Minimum and maximum in 11 draws from the posterior predictive distribution:
+```{r}
+pp_dat <- posterior_predict(m_lognorm_90, ndraws = 11)
+apply(pp_dat, 1, min)
+apply(pp_dat, 1, max)
+```
+
+Let's take a look at posterior predicted mean and median
+
+```{r}
+## mean
+apply(pp_dat, 1, mean)
+## median
+apply(pp_dat, 1, median)
+```
+
+Calculate predicted mean and predicted median (based on lognormal distribution)
+
+```{r}
+## calculate mean and median by hand
+#get_variables(m_lognorm_90)
+dd <- m_lognorm_360 %>% 
+  spread_draws(b_Intercept, sigma) %>% 
+  mutate(mean = exp(b_Intercept + (sigma^2 / 2)), 
+         median = exp(b_Intercept))
+dd %>% 
+  mean_hdi(mean)
+dd %>% 
+  mean_hdi(median)
+```
+
+## Shifted Lognormal Model
+
+```{r, include=FALSE}
+
+tmp_model_filename <- "model_fits/model_slognormal_2.rda"
+if (file.exists(tmp_model_filename)) {
+  load(tmp_model_filename)
+} else {
+  m_slognorm_360 <- brm(time ~ 1 + (1|ppt_id), data = bet_times_360, 
+                      family = shifted_lognormal(),
+                      iter = 2000, warmup = 1000, chains = 6) 
+  save(m_slognorm_360, file = tmp_model_filename, compress = "xz")
+}
+
+
+```
+
+```{r}
+summary(m_slognorm_360)
+```
+
+```{r, fig.asp=1.2}
+plot(m_slognorm_360)
+```
+
+```{r, fig.width=6, out.width="100%"}
+pp1 <- pp_check(m_slognorm_360, type = "hist", binwidth = 2, ndraws = 11) +
+  theme(legend.position = "none")
+pp1
+
+```
+
+### Model quantities and Statistics
+Minimum and maximum betting times in the data:
+
+```{r}
+min(bet_times_360$time)
+max(bet_times_360$time)
+```
+
+Minimum and maximum in 11 draws from the posterior predictive distribution:
+```{r}
+pp_dat <- posterior_predict(m_slognorm_360, ndraws = 11)
+apply(pp_dat, 1, min)
+apply(pp_dat, 1, max)
+```
+
+Let's take a look at posterior predicted mean and median
+
+```{r}
+## mean
+apply(pp_dat, 1, mean)
+## median
+apply(pp_dat, 1, median)
+```
+
+
+Calculate predicted mean and predicted median (based on shifted-lognormal distribution)
+
+```{r}
+## calculate mean and median by hand
+#get_variables(m_slognorm_90)[1:20]
+dd_shifted <- m_slognorm_360 %>% 
+  spread_draws(b_Intercept, sigma, ndt) %>% 
+  mutate(mean = ndt + exp(b_Intercept + (sigma^2 / 2)), 
+         median = ndt + exp(b_Intercept))
+dd_shifted %>% 
+  mean_hdi(mean)
+dd_shifted %>% 
+  mean_hdi(median)
 ```
 
 
